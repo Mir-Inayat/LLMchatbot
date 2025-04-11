@@ -5,11 +5,19 @@ Script to load the cybersecurity threats dataset into a Neo4j knowledge graph.
 import os
 import csv
 import pandas as pd
+import sys
 from pathlib import Path
 from backend.knowledge_graph.neo4j_client import Neo4jClient
 
+# Add more verbose output
+def log(message):
+    """Print log message and ensure it's flushed immediately"""
+    print(message, flush=True)
+    sys.stdout.flush()
+
 def create_cybersecurity_threats_schema(client):
     """Create schema for cybersecurity threats knowledge graph."""
+    log("Creating schema for cybersecurity knowledge graph...")
     # Create constraints to ensure uniqueness
     constraints = [
         "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Country) REQUIRE c.name IS UNIQUE",
@@ -40,8 +48,9 @@ def create_cybersecurity_threats_schema(client):
         with client.driver.session(database=client.database) as session:
             for query in constraints + indexes:
                 session.run(query)
+        log("✅ Schema created successfully!")
     except Exception as e:
-        print(f"Error creating schema: {e}")
+        log(f"❌ Error creating schema: {e}")
         success = False
     
     return success
@@ -55,16 +64,19 @@ def load_cybersecurity_csv(client, csv_path):
         csv_path: Path to the CSV file
     """
     # Read the CSV file
+    log(f"Reading CSV file: {csv_path}")
     df = pd.read_csv(csv_path)
-    print(f"Loaded {len(df)} incidents from CSV")
+    log(f"✅ Loaded {len(df)} incidents from CSV")
     
     # Create nodes for each entity type
+    log("Creating entity nodes...")
     create_entity_nodes(client, df)
     
     # Create incident nodes and relationships
+    log("Creating incident nodes and relationships...")
     create_incidents_and_relationships(client, df)
     
-    print("Finished loading cybersecurity threats knowledge graph")
+    log("✅ Finished loading cybersecurity threats knowledge graph")
 
 def create_entity_nodes(client, df):
     """Create nodes for each entity type in the dataset."""
@@ -75,7 +87,7 @@ def create_entity_nodes(client, df):
     MERGE (c:Country {name: country})
     """
     client.execute_query(countries_query, {"countries": countries})
-    print(f"Created {len(countries)} Country nodes")
+    log(f"✅ Created {len(countries)} Country nodes")
     
     # Create Year nodes
     years = df['Year'].unique().tolist()
@@ -84,7 +96,7 @@ def create_entity_nodes(client, df):
     MERGE (y:Year {value: year})
     """
     client.execute_query(years_query, {"years": years})
-    print(f"Created {len(years)} Year nodes")
+    log(f"✅ Created {len(years)} Year nodes")
     
     # Create AttackType nodes
     attack_types = df['Attack Type'].unique().tolist()
@@ -93,7 +105,7 @@ def create_entity_nodes(client, df):
     MERGE (a:AttackType {name: attackType})
     """
     client.execute_query(attack_types_query, {"attackTypes": attack_types})
-    print(f"Created {len(attack_types)} AttackType nodes")
+    log(f"✅ Created {len(attack_types)} AttackType nodes")
     
     # Create Industry nodes
     industries = df['Target Industry'].unique().tolist()
@@ -102,7 +114,7 @@ def create_entity_nodes(client, df):
     MERGE (i:Industry {name: industry})
     """
     client.execute_query(industries_query, {"industries": industries})
-    print(f"Created {len(industries)} Industry nodes")
+    log(f"✅ Created {len(industries)} Industry nodes")
     
     # Create AttackSource nodes
     sources = df['Attack Source'].unique().tolist()
@@ -111,7 +123,7 @@ def create_entity_nodes(client, df):
     MERGE (s:AttackSource {name: source})
     """
     client.execute_query(sources_query, {"sources": sources})
-    print(f"Created {len(sources)} AttackSource nodes")
+    log(f"✅ Created {len(sources)} AttackSource nodes")
     
     # Create Vulnerability nodes
     vulnerabilities = df['Security Vulnerability Type'].unique().tolist()
@@ -120,7 +132,7 @@ def create_entity_nodes(client, df):
     MERGE (v:Vulnerability {name: vulnerability})
     """
     client.execute_query(vulnerabilities_query, {"vulnerabilities": vulnerabilities})
-    print(f"Created {len(vulnerabilities)} Vulnerability nodes")
+    log(f"✅ Created {len(vulnerabilities)} Vulnerability nodes")
     
     # Create Defense nodes
     defenses = df['Defense Mechanism Used'].unique().tolist()
@@ -129,7 +141,7 @@ def create_entity_nodes(client, df):
     MERGE (d:Defense {name: defense})
     """
     client.execute_query(defenses_query, {"defenses": defenses})
-    print(f"Created {len(defenses)} Defense nodes")
+    log(f"✅ Created {len(defenses)} Defense nodes")
 
 def create_incidents_and_relationships(client, df):
     """Create incident nodes and establish relationships with other entities."""
@@ -152,6 +164,8 @@ def create_incidents_and_relationships(client, df):
             "defense": row['Defense Mechanism Used']
         }
         incidents.append(incident)
+    
+    log(f"Preparing to create {len(incidents)} incident nodes with relationships")
     
     # Create incident nodes and relationships in batches
     batch_size = 100
@@ -207,8 +221,11 @@ def create_incidents_and_relationships(client, df):
         """
         
         client.execute_query(query, {"incidents": batch})
-        print(f"Created {len(batch)} Incident nodes with relationships")
+        log(f"✅ Created {len(batch)} Incident nodes with relationships")
 
+    # Create additional relationships
+    log("Creating additional relationships between entities...")
+    
     # Create additional relationship between attack types and vulnerabilities
     attack_vulnerability_query = """
     MATCH (a:AttackType)<-[:USED_ATTACK]-(i:Incident)-[:EXPLOITED]->(v:Vulnerability)
@@ -217,6 +234,7 @@ def create_incidents_and_relationships(client, df):
     SET r.frequency = frequency
     """
     client.execute_query(attack_vulnerability_query)
+    log("✅ Created EXPLOITS relationships between attack types and vulnerabilities")
     
     # Create relationship between countries and attack sources
     country_source_query = """
@@ -226,6 +244,7 @@ def create_incidents_and_relationships(client, df):
     SET r.frequency = frequency
     """
     client.execute_query(country_source_query)
+    log("✅ Created EXPERIENCED_ATTACKS_FROM relationships between countries and attack sources")
     
     # Create relationship between defense mechanisms and vulnerabilities
     defense_vulnerability_query = """
@@ -235,33 +254,108 @@ def create_incidents_and_relationships(client, df):
     SET r.frequency = frequency
     """
     client.execute_query(defense_vulnerability_query)
+    log("✅ Created PROTECTS_AGAINST relationships between defense mechanisms and vulnerabilities")
+
+def check_graph_statistics(client):
+    """Run queries to check the knowledge graph statistics."""
+    log("\n📊 Knowledge Graph Statistics:")
+    
+    # Check node counts
+    node_counts_query = """
+    MATCH (n)
+    RETURN labels(n)[0] AS nodeType, count(n) AS count
+    ORDER BY count DESC
+    """
+    results = client.execute_query(node_counts_query)
+    log("\nNode counts:")
+    for result in results:
+        log(f"  - {result['nodeType']}: {result['count']} nodes")
+    
+    # Check relationship counts
+    rel_counts_query = """
+    MATCH ()-[r]->()
+    RETURN type(r) AS relType, count(r) AS count
+    ORDER BY count DESC
+    """
+    results = client.execute_query(rel_counts_query)
+    log("\nRelationship counts:")
+    for result in results:
+        log(f"  - {result['relType']}: {result['count']} relationships")
+    
+    # Check a sample incident
+    sample_query = """
+    MATCH (i:Incident)-[:OCCURRED_IN]->(c:Country)
+    MATCH (i)-[:USED_ATTACK]->(a:AttackType)
+    MATCH (i)-[:TARGETED]->(ind:Industry)
+    RETURN i.id, c.name, a.name, ind.name
+    LIMIT 1
+    """
+    results = client.execute_query(sample_query)
+    if results:
+        result = results[0]
+        log(f"\nSample incident: {result['i.id']}")
+        log(f"  - Country: {result['c.name']}")
+        log(f"  - Attack Type: {result['a.name']}")
+        log(f"  - Target Industry: {result['ind.name']}")
 
 def main():
     """Main function to load the cybersecurity threats dataset."""
+    log("🔄 Starting cybersecurity knowledge graph creation process")
+    
     # Initialize Neo4j client
+    log("Initializing Neo4j client...")
     client = Neo4jClient()
     
     # Test connection
+    log("Testing Neo4j connection...")
     if not client.test_connection():
-        print("Failed to connect to Neo4j. Please check your connection settings.")
+        log("❌ Failed to connect to Neo4j. Please check your connection settings.")
+        log("Ensure you have set the following environment variables:")
+        log("  - NEO4J_URI (default: bolt://localhost:7687)")
+        log("  - NEO4J_USERNAME (default: neo4j)")
+        log("  - NEO4J_PASSWORD (default: password)")
+        log("  - NEO4J_DATABASE (default: neo4j)")
         return
+    
+    log("✅ Successfully connected to Neo4j")
+    
+    # Check if data already exists
+    check_query = """
+    MATCH (i:Incident) RETURN count(i) as count
+    """
+    result = client.execute_query(check_query)
+    existing_count = result[0]['count'] if result else 0
+    
+    if existing_count > 0:
+        log(f"⚠️ Found {existing_count} existing incident nodes in the database.")
+        log("To avoid duplicate data, consider clearing the database before loading again.")
+        user_input = input("Continue anyway? (y/n): ")
+        if user_input.lower() != 'y':
+            log("Operation cancelled by user.")
+            client.close()
+            return
     
     # Create schema
     if not create_cybersecurity_threats_schema(client):
-        print("Failed to create schema. Exiting.")
+        log("❌ Failed to create schema. Exiting.")
+        client.close()
         return
     
     # Load CSV data
     csv_path = os.path.join("data", "raw", "Global_Cybersecurity_Threats_2015-2024.csv")
     if not os.path.exists(csv_path):
-        print(f"CSV file not found at {csv_path}")
+        log(f"❌ CSV file not found at {csv_path}")
+        client.close()
         return
     
     load_cybersecurity_csv(client, csv_path)
     
+    # Check graph statistics
+    check_graph_statistics(client)
+    
     # Close connection
     client.close()
-    print("Done!")
+    log("✅ Done! Cybersecurity knowledge graph has been successfully created.")
 
 if __name__ == "__main__":
     main()

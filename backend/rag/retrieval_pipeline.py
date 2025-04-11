@@ -135,73 +135,58 @@ class RAGPipeline:
         return any(keyword.lower() in query_lower for keyword in cybersecurity_keywords)
     
     def _process_cybersecurity_query(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
-        """
-        Process a cybersecurity-related query.
+        """Process a cybersecurity-related query with specialized handling."""
         
-        Args:
-            query: The user's query
-            chat_history: Previous conversation turns
-            
-        Returns:
-            Dict containing answer and optional graph data
-        """
-        # Extract potential entities or usernames from the query
+        # Step 1: Extract potential entities for improved context
+        extracted_entities = self._extract_entities(query)
         potential_users = self._extract_potential_users(query)
+        potential_computers = self._extract_potential_computers(query)
         
-        # Start with a general context
-        cypher_results = []
+        # Step 2: Optimize query for the cybersecurity domain
+        cybersecurity_terms = ["attack", "breach", "vulnerability", "threat", "malware", 
+                               "phishing", "ransomware", "encryption", "firewall", "exploit"]
         
-        # If we have potential users mentioned, check their access paths
-        if potential_users:
-            for user in potential_users:
-                # Find RDP access
-                rdp_results = self.neo4j_client.find_rdp_access(user)
-                if rdp_results:
-                    cypher_results.extend(rdp_results)
-                    
-                # Find group memberships
-                group_results = self.neo4j_client.find_user_group_memberships(user)
-                if group_results:
-                    cypher_results.extend(group_results)
-        
-        # Check for attack path analysis in the query
-        if 'attack' in query.lower() and 'path' in query.lower():
-            # Default target for demonstration purposes
-            target = "DC01.TESTCOMPANY.LOCAL"
+        # Check if query is asking for a specific cypher-based analysis
+        if any(term in query.lower() for term in ["top attack", "most common", "statistics", "highest risk"]):
+            # Run pre-defined analytical queries on the knowledge graph
+            kg_loader = CybersecurityKGLoader(self.neo4j_client)
+            predefined_queries = kg_loader.get_common_cybersecurity_queries()
+            matching_queries = []
             
-            # Try to extract a potential target from the query
-            potential_targets = self._extract_potential_computers(query)
-            if potential_targets:
-                target = potential_targets[0]
+            for query_def in predefined_queries:
+                if any(term in query.lower() for term in query_def["name"].lower().split()):
+                    matching_queries.append(query_def)
+            
+            if matching_queries:
+                # Execute the matching analytical query
+                analytical_results = []
+                for match in matching_queries[:1]:  # Just use the first match for now
+                    result = self.neo4j_client.execute_query(match["query"])
+                    analytical_results.append({
+                        "query_name": match["name"],
+                        "results": result
+                    })
                 
-            # Find attack paths
-            path_results = self.neo4j_client.find_attack_paths(target)
-            if path_results:
-                cypher_results.extend(path_results)
+                # Format analytical results for LLM context
+                cypher_results = [{
+                    "name": f"Analysis: {ar['query_name']}",
+                    "labels": ["Analysis", "Statistics"],
+                    "description": f"Results from knowledge graph analysis: {str(ar['results'][:5])}"
+                } for ar in analytical_results]
+            else:
+                # Perform semantic search if no pre-defined query matches
+                cypher_results = self.neo4j_client.semantic_search(
+                    query, 
+                    additional_entities=[*extracted_entities, *potential_users, *potential_computers]
+                )
+        else:
+            # Regular semantic search
+            cypher_results = self.neo4j_client.semantic_search(
+                query, 
+                additional_entities=[*extracted_entities, *potential_users, *potential_computers]
+            )
         
-        # Check for high-value targets in the query
-        if 'high value' in query.lower() or 'target' in query.lower():
-            target_results = self.neo4j_client.find_high_value_targets()
-            if target_results:
-                cypher_results.extend(target_results)
-        
-        # Check for admin queries
-        if 'admin' in query.lower() or 'administrator' in query.lower():
-            admin_results = self.neo4j_client.find_domain_admins()
-            if admin_results:
-                cypher_results.extend(admin_results)
-        
-        # Check for kerberoasting vulnerabilities
-        if 'kerberos' in query.lower() or 'vulnerability' in query.lower():
-            kerb_results = self.neo4j_client.find_kerberoastable_accounts()
-            if kerb_results:
-                cypher_results.extend(kerb_results)
-        
-        # If we didn't get specific results, do a generic semantic search
-        if not cypher_results:
-            cypher_results = self.neo4j_client.keyword_search(query)
-        
-        # Generate an answer using the LLM and the retrieved context
+        # Step 3: Generate answer using the LLM and KG context
         structured_answer = self.llm_handler.generate_structured_answer(
             query=query,
             kg_context=cypher_results,
@@ -209,7 +194,7 @@ class RAGPipeline:
             domain="cybersecurity"  # Add domain hint for the LLM
         )
         
-        # Extract entities for graph visualization
+        # Step 4: Extract entities for graph visualization
         graph_data = None
         entities_for_graph = []
         
@@ -223,25 +208,22 @@ class RAGPipeline:
         
         # Add potential users and computers
         entities_for_graph.extend(potential_users)
-        entities_for_graph.extend(self._extract_potential_computers(query))
+        entities_for_graph.extend(potential_computers)
         
         # Add entities from cypher results
         for result in cypher_results:
-            for key, value in result.items():
-                if isinstance(value, str) and key not in ('description', 'properties'):
-                    entities_for_graph.append(value)
+            if result.get("name"):
+                entities_for_graph.append(result["name"])
         
-        # Remove duplicates and get the top 5 entities
-        unique_entities = list(set(entities_for_graph))
-        if unique_entities:
-            graph_data = self.neo4j_client.get_subgraph_for_entities(unique_entities[:5])
+        # Only include if we have entities to visualize
+        if entities_for_graph:
+            # Get subgraph data for visualization
+            graph_data = self.neo4j_client.get_visualization_subgraph([e for e in entities_for_graph if e])
         
-        # Prepare the final response
         return {
-            "answer": structured_answer.get("answer", "No answer generated"),
+            "answer": structured_answer["answer"],
             "sources": cypher_results,
-            "graph_data": graph_data,
-            "domain": "cybersecurity"  # Identify this as a cybersecurity response
+            "graph_data": graph_data
         }
     
     def _extract_entities(self, text: str) -> List[str]:

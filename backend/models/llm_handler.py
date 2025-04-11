@@ -6,19 +6,29 @@ from langchain.chains import LLMChain
 from langchain.llms.base import LLM
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import Generation, LLMResult
+import requests
 
 class LLMHandler:
-    """Handler for LLM interactions using LangChain with Hugging Face's models."""
+    """Handler for LLM interactions using LangChain with Mistral models."""
     
     def __init__(self):
         """Initialize the LLM handler."""
         load_dotenv()
         
         # Get API key from environment
-        self.hf_api_key = os.getenv("HF_API_KEY")
+        self.mistral_api_key = os.getenv("MISTRAL_API_KEY")
         
-        # For testing purposes, we'll create a mock LLM implementation
-        self.llm = MockLLM()
+        # Initialize Mistral LLM
+        if self.mistral_api_key:
+            self.llm = MistralLLM(
+                mistral_api_key=self.mistral_api_key,
+                model_name=os.getenv("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.2"))
+            )
+        else:
+            # Fallback to mock LLM if no API key
+            print("Using Mock LLM (no Mistral API key provided)")
+            self.llm = MockLLM()
         
         # Create the system prompt for cybersecurity domain
         self.cybersecurity_system_prompt = """
@@ -41,8 +51,18 @@ class LLMHandler:
     def test_connection(self) -> bool:
         """Test if the LLM connection is working."""
         try:
-            # Using our mock LLM for testing
-            return True
+            # Try a simple completion to test if the API is working
+            if isinstance(self.llm, MockLLM):
+                return True
+                
+            # For actual Mistral, we'll run a simple test query
+            prompt_template = PromptTemplate(
+                template="<s>[INST] Say 'Connection successful' if you can read this: {text} [/INST]",
+                input_variables=["text"]
+            )
+            chain = LLMChain(llm=self.llm, prompt=prompt_template)
+            result = chain.run(text="Testing LLM connection")
+            return "connection successful" in result.lower()
         except Exception as e:
             print(f"Error testing LLM connection: {e}")
             return False
@@ -215,6 +235,82 @@ class LLMHandler:
             
         return "\n".join(context_sections)
 
+class MistralLLM(LLM):
+    """LLM implementation for Mistral AI API."""
+    
+    mistral_api_key: str
+    model_name: str = "mistralai/Mistral-7B-Instruct-v0.2"
+    temperature: float = 0.2
+    api_url: str = "https://api.mistral.ai/v1/chat/completions"
+    
+    def __init__(self, mistral_api_key: str, model_name: str = "mistralai/Mistral-7B-Instruct-v0.2", temperature: float = 0.2):
+        """Initialize the Mistral LLM."""
+        super().__init__()
+        # Using proper attribute setting through __dict__ to avoid Pydantic validation
+        self.__dict__["mistral_api_key"] = mistral_api_key
+        self.__dict__["model_name"] = model_name
+        self.__dict__["temperature"] = temperature
+        self.__dict__["api_url"] = "https://api.mistral.ai/v1/chat/completions"
+    
+    @property
+    def _llm_type(self) -> str:
+        """Return type of LLM."""
+        return "mistral_llm"
+    
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Call the Mistral API and return the response."""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.mistral_api_key}"
+        }
+        
+        # Parse system message if present
+        system_message = None
+        user_message = prompt
+        
+        # Extract system message if the prompt follows the format <s>[INST] ... [/INST]
+        if prompt.startswith("<s>[INST]") and "[/INST]" in prompt:
+            user_message = prompt.replace("<s>[INST]", "").split("[/INST]")[0].strip()
+        
+        # Prepare the request payload
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": "user", "content": user_message}],
+            "temperature": self.temperature
+        }
+        
+        if system_message:
+            payload["messages"].insert(0, {"role": "system", "content": system_message})
+        
+        if stop:
+            payload["stop"] = stop
+        
+        try:
+            response = requests.post(self.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"Error calling Mistral API: {e}")
+            if response and hasattr(response, 'text'):
+                print(f"Response: {response.text}")
+            raise
+    
+    def generate(
+        self, prompts: List[str], stop: Optional[List[str]] = None, **kwargs: Any
+    ) -> LLMResult:
+        """Generate method implementation required by LangChain."""
+        return LLMResult(
+            generations=[[Generation(text=self._call(prompt, stop=stop))] for prompt in prompts]
+        )
+
 class MockLLM(LLM):
     """A mock LLM implementation for testing purposes that follows LangChain's interface."""
     
@@ -231,7 +327,7 @@ class MockLLM(LLM):
         **kwargs: Any,
     ) -> str:
         """Mock implementation that returns a fixed response."""
-        return "This is a mock response from the LLM. Your prompt has been processed successfully."
+        return "This is a mock response from the LLM. Your prompt has been processed successfully. Based on the cybersecurity knowledge graph, I can tell you that phishing attacks are one of the most common forms of social engineering.\n\nENTITIES:\n- phishing attacks\n- social engineering"
     
     def generate(
         self, prompts: List[str], stop: Optional[List[str]] = None, **kwargs: Any

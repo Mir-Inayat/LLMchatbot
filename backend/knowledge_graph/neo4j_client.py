@@ -225,6 +225,84 @@ class Neo4jClient:
             print(f"Error creating vector index: {e}")
             return False
     
+    def get_visualization_subgraph(self, entities: List[str], max_nodes: int = 15) -> Dict[str, Any]:
+        """
+        Get a subgraph for visualization based on the provided entities.
+        
+        Args:
+            entities: List of entity names to include in the subgraph
+            max_nodes: Maximum number of nodes to include
+            
+        Returns:
+            Dict with nodes and relationships for visualization
+        """
+        if not entities:
+            return {"nodes": [], "relationships": []}
+        
+        # Limit the number of entities to avoid creating too large visualizations
+        entities = entities[:max_nodes]
+        
+        # Create the Cypher query
+        query = """
+        UNWIND $entities AS entity
+        MATCH (n)
+        WHERE n.name =~ ('(?i).*' + entity + '.*') OR 
+              CASE WHEN n:Year THEN toString(n.value) =~ ('(?i).*' + entity + '.*') ELSE false END
+        
+        WITH COLLECT(n) AS nodes
+        UNWIND nodes AS n
+        MATCH (n)-[r]-(m)
+        WHERE m IN nodes OR m.name =~ ('(?i).*' + $entities[0] + '.*')
+        
+        WITH nodes + COLLECT(DISTINCT m) AS allNodes, COLLECT(DISTINCT r) AS rels
+        UNWIND allNodes AS node
+        WITH COLLECT(DISTINCT node) AS uniqueNodes, rels
+        
+        RETURN uniqueNodes AS nodes, rels AS relationships
+        LIMIT 1
+        """
+        
+        try:
+            result = self.execute_query(query, {"entities": entities})
+            
+            if not result:
+                return {"nodes": [], "relationships": []}
+            
+            graph_data = result[0]
+            
+            # Format nodes and relationships
+            formatted_nodes = []
+            for node in graph_data.get("nodes", []):
+                properties = dict(node.items())
+                node_type = list(node.labels)[0] if hasattr(node, "labels") and node.labels else "Unknown"
+                
+                formatted_node = {
+                    "id": str(node.id) if hasattr(node, "id") else str(id(node)),
+                    "labels": [node_type],
+                    "properties": properties
+                }
+                formatted_nodes.append(formatted_node)
+            
+            formatted_relationships = []
+            for rel in graph_data.get("relationships", []):
+                formatted_rel = {
+                    "id": str(rel.id) if hasattr(rel, "id") else str(id(rel)),
+                    "type": rel.type if hasattr(rel, "type") else "RELATED_TO",
+                    "startNode": str(rel.start_node.id) if hasattr(rel, "start_node") else "",
+                    "endNode": str(rel.end_node.id) if hasattr(rel, "end_node") else "",
+                    "properties": dict(rel.items()) if hasattr(rel, "items") else {}
+                }
+                formatted_relationships.append(formatted_rel)
+            
+            return {
+                "nodes": formatted_nodes,
+                "relationships": formatted_relationships
+            }
+            
+        except Exception as e:
+            print(f"Error getting visualization subgraph: {e}")
+            return {"nodes": [], "relationships": []}
+    
     # Cybersecurity-specific methods
     
     def find_rdp_access(self, username: str) -> List[Dict]:

@@ -62,8 +62,15 @@ async def root():
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    """
+    Process a chat request and return an AI response with knowledge graph information.
+    """
     try:
-        # Process the user query through the RAG pipeline
+        # Check if RAG pipeline is initialized
+        if not hasattr(app.state, "rag_pipeline"):
+            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        
+        # Process query through the RAG pipeline
         result = app.state.rag_pipeline.process_query(
             query=request.query,
             chat_history=request.history
@@ -71,10 +78,11 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             answer=result["answer"],
-            sources=result.get("sources"),
-            graph_data=result.get("graph_data")
+            sources=result.get("sources", []),
+            graph_data=result.get("graph_data", None)
         )
     except Exception as e:
+        print(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")
