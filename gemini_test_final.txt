@@ -1,0 +1,11 @@
+Testing Gemini API Connection
+===========================
+
+API Key: AIzaS...MmRY
+Model: gemini-2.0-flash
+
+
+
+Trying gemini-1.0-pro with v1beta API...
+URL: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=AIzaSyD_RTZuh-ygB1FbOuu14i5LQcz-8w3MmRY
+Status code: 404

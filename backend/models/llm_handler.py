@@ -7,27 +7,43 @@ from langchain.llms.base import LLM
 from langchain.callbacks.manager import CallbackManagerForLLMRun
 from langchain_core.outputs import Generation, LLMResult
 import requests
+import json
+import google.generativeai as genai
 
 class LLMHandler:
-    """Handler for LLM interactions using LangChain with Mistral models."""
+    """Handler for LLM interactions using Gemini API."""
     
     def __init__(self):
         """Initialize the LLM handler."""
         load_dotenv()
         
         # Get API key from environment
-        self.mistral_api_key = os.getenv("MISTRAL_API_KEY")
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         
-        # Initialize Mistral LLM
-        if self.mistral_api_key:
-            self.llm = MistralLLM(
-                mistral_api_key=self.mistral_api_key,
-                model_name=os.getenv("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.2"),
-                temperature=float(os.getenv("LLM_TEMPERATURE", "0.2"))
-            )
+        # Initialize LLM
+        if self.gemini_api_key:
+            # Use a direct API implementation rather than LangChain's LLM
+            self.use_mock = False
+            self.model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
+            self.temperature = float(os.getenv("TEMPERATURE", "0.7"))
+            
+            # Configure Google Generative AI
+            genai.configure(api_key=self.gemini_api_key)
+            
+            # Get the model
+            try:
+                self.genai_model = genai.GenerativeModel(self.model_name)
+                print(f"Using Gemini model: {self.model_name} with temperature: {self.temperature}")
+            except Exception as e:
+                print(f"Error initializing Gemini model: {e}")
+                self.use_mock = True
+                
+            # Create a mock LLM for LangChain compatibility (but we'll use direct API calls)
+            self.llm = MockLLM()
         else:
             # Fallback to mock LLM if no API key
-            print("Using Mock LLM (no Mistral API key provided)")
+            self.use_mock = True
+            print("Using Mock LLM (no Gemini API key provided)")
             self.llm = MockLLM()
         
         # Create the system prompt for cybersecurity domain
@@ -51,21 +67,60 @@ class LLMHandler:
     def test_connection(self) -> bool:
         """Test if the LLM connection is working."""
         try:
-            # Try a simple completion to test if the API is working
-            if isinstance(self.llm, MockLLM):
+            if self.use_mock:
                 return True
                 
-            # For actual Mistral, we'll run a simple test query
-            prompt_template = PromptTemplate(
-                template="<s>[INST] Say 'Connection successful' if you can read this: {text} [/INST]",
-                input_variables=["text"]
-            )
-            chain = LLMChain(llm=self.llm, prompt=prompt_template)
-            result = chain.run(text="Testing LLM connection")
-            return "connection successful" in result.lower()
+            # Use the Google AI client library instead of direct API calls
+            prompt = "Say 'Connection successful' if you can read this"
+            
+            try:
+                response = self.genai_model.generate_content(prompt)
+                response_text = response.text
+                return "connection successful" in response_text.lower()
+            except Exception as e:
+                print(f"Error testing LLM connection with Google AI client: {e}")
+                return False
         except Exception as e:
             print(f"Error testing LLM connection: {e}")
             return False
+    
+    def get_llm_response(self, prompt: str) -> str:
+        """
+        Get a direct response from the LLM.
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            
+        Returns:
+            Response from the LLM
+        """
+        if self.use_mock:
+            return "LLM connection successful. This is a mock response."
+        
+        try:
+            # Use the Google AI client library
+            generation_config = {
+                "temperature": self.temperature,
+            }
+            
+            try:
+                # Set generation config
+                response = self.genai_model.generate_content(
+                    prompt,
+                    generation_config=generation_config
+                )
+                
+                # Check if the response has content
+                if response and hasattr(response, 'text'):
+                    return response.text
+                
+                return "No response generated from the model."
+            except Exception as e:
+                print(f"Error generating content with Google AI client: {e}")
+                return f"I'm sorry, I encountered an error while generating your answer with the Gemini model. Error: {str(e)}"
+        except Exception as e:
+            print(f"Error calling Gemini API: {e}")
+            return f"I'm sorry, I encountered an error while generating your answer. Error: {str(e)}"
     
     def generate_answer(self, 
                        query: str, 
@@ -93,28 +148,27 @@ class LLMHandler:
                 content = message["content"]
                 history_text += f"{role.capitalize()}: {content}\n"
         
-        # Create a prompt for Mistral using its specific instruction format
-        instruction = f"{self.healthcare_system_prompt}\n\n"
+        # Create the full instruction
+        instruction = f"{self.cybersecurity_system_prompt}\n\n"
         
         if history_text:
             instruction += f"Previous conversation:\n{history_text}\n\n"
             
         instruction += f"Knowledge Graph Context:\n{formatted_context}\n\nUser Query: {query}\n\nYour helpful answer:"
         
-        # Create the Mistral-specific instruction format
-        prompt_template = PromptTemplate(
-            template="<s>[INST] {instruction} [/INST]",
-            input_variables=["instruction"]
-        )
-        
-        # Create and run the chain
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
-        try:
+        # Either use the mock LLM or make a direct API call
+        if self.use_mock:
+            # Use LangChain with the mock LLM
+            prompt_template = PromptTemplate(
+                template="{instruction}",
+                input_variables=["instruction"]
+            )
+            chain = LLMChain(llm=self.llm, prompt=prompt_template)
             result = chain.run(instruction=instruction)
             return result
-        except Exception as e:
-            print(f"Error generating answer: {e}")
-            return "I'm sorry, I encountered an error while generating your answer. Please try again."
+        else:
+            # Make a direct API call to Gemini
+            return self.get_llm_response(instruction)
     
     def generate_structured_answer(self, 
                                  query: str, 
@@ -166,7 +220,7 @@ class LLMHandler:
             """
             system_prompt = self.healthcare_system_prompt
         
-        # Create a prompt for Mistral using its specific instruction format
+        # Create the full instruction
         instruction = f"{system_prompt}\n\n{structure_instructions}\n\n"
         
         if history_text:
@@ -174,17 +228,19 @@ class LLMHandler:
             
         instruction += f"Knowledge Graph Context:\n{formatted_context}\n\nUser Query: {query}\n\nYour helpful answer:"
         
-        # Create the Mistral-specific instruction format
-        prompt_template = PromptTemplate(
-            template="<s>[INST] {instruction} [/INST]",
-            input_variables=["instruction"]
-        )
-        
-        # Create and run the chain
-        chain = LLMChain(llm=self.llm, prompt=prompt_template)
-        
+        # Either use the mock LLM or make a direct API call
         try:
-            result = chain.run(instruction=instruction)
+            if self.use_mock:
+                # Use LangChain with the mock LLM
+                prompt_template = PromptTemplate(
+                    template="{instruction}",
+                    input_variables=["instruction"]
+                )
+                chain = LLMChain(llm=self.llm, prompt=prompt_template)
+                result = chain.run(instruction=instruction)
+            else:
+                # Make a direct API call to Gemini
+                result = self.get_llm_response(instruction)
             
             # Parse entities from the result
             answer = result
@@ -204,7 +260,7 @@ class LLMHandler:
         except Exception as e:
             print(f"Error generating structured answer: {e}")
             return {
-                "answer": "I'm sorry, I encountered an error while generating your answer. Please try again.",
+                "answer": f"I'm sorry, I encountered an error while generating your answer. Error: {str(e)}",
                 "entities": []
             }
     
@@ -235,82 +291,6 @@ class LLMHandler:
             
         return "\n".join(context_sections)
 
-class MistralLLM(LLM):
-    """LLM implementation for Mistral AI API."""
-    
-    mistral_api_key: str
-    model_name: str = "mistralai/Mistral-7B-Instruct-v0.2"
-    temperature: float = 0.2
-    api_url: str = "https://api.mistral.ai/v1/chat/completions"
-    
-    def __init__(self, mistral_api_key: str, model_name: str = "mistralai/Mistral-7B-Instruct-v0.2", temperature: float = 0.2):
-        """Initialize the Mistral LLM."""
-        super().__init__()
-        # Using proper attribute setting through __dict__ to avoid Pydantic validation
-        self.__dict__["mistral_api_key"] = mistral_api_key
-        self.__dict__["model_name"] = model_name
-        self.__dict__["temperature"] = temperature
-        self.__dict__["api_url"] = "https://api.mistral.ai/v1/chat/completions"
-    
-    @property
-    def _llm_type(self) -> str:
-        """Return type of LLM."""
-        return "mistral_llm"
-    
-    def _call(
-        self,
-        prompt: str,
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> str:
-        """Call the Mistral API and return the response."""
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.mistral_api_key}"
-        }
-        
-        # Parse system message if present
-        system_message = None
-        user_message = prompt
-        
-        # Extract system message if the prompt follows the format <s>[INST] ... [/INST]
-        if prompt.startswith("<s>[INST]") and "[/INST]" in prompt:
-            user_message = prompt.replace("<s>[INST]", "").split("[/INST]")[0].strip()
-        
-        # Prepare the request payload
-        payload = {
-            "model": self.model_name,
-            "messages": [{"role": "user", "content": user_message}],
-            "temperature": self.temperature
-        }
-        
-        if system_message:
-            payload["messages"].insert(0, {"role": "system", "content": system_message})
-        
-        if stop:
-            payload["stop"] = stop
-        
-        try:
-            response = requests.post(self.api_url, headers=headers, json=payload)
-            response.raise_for_status()
-            
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"Error calling Mistral API: {e}")
-            if response and hasattr(response, 'text'):
-                print(f"Response: {response.text}")
-            raise
-    
-    def generate(
-        self, prompts: List[str], stop: Optional[List[str]] = None, **kwargs: Any
-    ) -> LLMResult:
-        """Generate method implementation required by LangChain."""
-        return LLMResult(
-            generations=[[Generation(text=self._call(prompt, stop=stop))] for prompt in prompts]
-        )
-
 class MockLLM(LLM):
     """A mock LLM implementation for testing purposes that follows LangChain's interface."""
     
@@ -326,8 +306,87 @@ class MockLLM(LLM):
         run_manager: Optional[CallbackManagerForLLMRun] = None,
         **kwargs: Any,
     ) -> str:
-        """Mock implementation that returns a fixed response."""
-        return "This is a mock response from the LLM. Your prompt has been processed successfully. Based on the cybersecurity knowledge graph, I can tell you that phishing attacks are one of the most common forms of social engineering.\n\nENTITIES:\n- phishing attacks\n- social engineering"
+        """Mock implementation that returns responses based on the input prompt."""        
+        prompt_lower = prompt.lower()
+        
+        if "hello" in prompt_lower or "hi" in prompt_lower or "greeting" in prompt_lower:
+            return "Hello! I'm your cybersecurity assistant. How can I help you today?"
+        
+        elif "phishing" in prompt_lower:
+            return """Phishing attacks are social engineering techniques that trick users into revealing sensitive information.
+            
+Common phishing methods include:
+1. Email phishing - Sending deceptive emails that appear to be from legitimate sources
+2. Spear phishing - Targeted attacks against specific individuals or organizations
+3. Whaling - Targeting high-profile executives or senior leaders
+4. Vishing - Voice phishing via phone calls
+5. Smishing - SMS-based phishing attacks
+
+The best defense against phishing is user education, email filtering, and multi-factor authentication.
+
+ENTITIES:
+- Phishing
+- Spear phishing
+- Whaling
+- Vishing
+- Smishing"""
+        
+        elif "ransomware" in prompt_lower:
+            return """Ransomware is malicious software that encrypts files and demands payment for decryption.
+            
+Notable ransomware attacks include:
+1. WannaCry (2017) - Exploited EternalBlue vulnerability
+2. NotPetya (2017) - Started as a supply chain attack
+3. REvil - Operates as Ransomware-as-a-Service (RaaS)
+4. Ryuk - Targets large organizations and government entities
+5. Conti - Known for double extortion tactics (encryption + data theft)
+
+Prevention measures include regular backups, patching systems, network segmentation, and employee training.
+
+ENTITIES:
+- Ransomware
+- WannaCry
+- NotPetya
+- REvil
+- Ryuk
+- Conti"""
+        
+        elif "ddos" in prompt_lower or "denial of service" in prompt_lower:
+            return """Distributed Denial of Service (DDoS) attacks attempt to overwhelm systems by flooding them with traffic.
+            
+Common DDoS attack types:
+1. Volume-based attacks - Overwhelm bandwidth (UDP floods, ICMP floods)
+2. Protocol attacks - Target server resources (SYN floods)
+3. Application layer attacks - Target specific applications or services
+4. Amplification attacks - Use legitimate services to amplify attack traffic
+
+Mitigation strategies include traffic filtering, rate limiting, and using DDoS protection services.
+
+ENTITIES:
+- DDoS
+- UDP floods
+- SYN floods
+- Application layer attacks
+- Amplification attacks"""
+        
+        else:
+            # Default response for other queries
+            return """Based on the cybersecurity knowledge graph, I can tell you that the most common cybersecurity threats include:
+
+1. Phishing attacks - These are social engineering techniques used to trick users into revealing sensitive information.
+2. Ransomware - Malicious software that encrypts files and demands payment for decryption.
+3. Distributed Denial of Service (DDoS) attacks - Attempts to overwhelm systems by flooding them with traffic.
+4. Data breaches - Unauthorized access to sensitive data, often leading to information theft.
+5. Malware - Various forms of malicious software designed to damage or gain unauthorized access to systems.
+
+These threats have been consistently among the top concerns for organizations across various industries.
+
+ENTITIES:
+- Phishing attacks
+- Ransomware
+- DDoS attacks
+- Data breaches
+- Malware"""
     
     def generate(
         self, prompts: List[str], stop: Optional[List[str]] = None, **kwargs: Any

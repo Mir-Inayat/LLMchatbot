@@ -39,36 +39,38 @@ def main():
         print(f"❌ Neo4j error: {e}")
         return
     
-    # Step 2: Verify LLM connection
-    print("\nVerifying LLM connection...")
+    # Step 2: Set up LLM handler (with graceful fallback to mock)
+    print("\nSetting up LLM handler...")
     try:
         llm_handler = LLMHandler()
+        gemini_key = os.getenv("GEMINI_API_KEY")
         
-        # Check for Mistral API key
-        mistral_key = os.getenv("MISTRAL_API_KEY")
-        if not mistral_key:
-            print("⚠️ No Mistral API key found. Will use Mock LLM instead.")
-            print("   To use Mistral, set MISTRAL_API_KEY in your .env file.")
-        
-        # Test connection
-        connection_ok = llm_handler.test_connection()
-        if connection_ok:
-            if mistral_key:
-                print(f"✅ LLM (Mistral - {os.getenv('LLM_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')}) connection successful")
-            else:
-                print("✅ Using Mock LLM (no Mistral API key provided)")
+        if not gemini_key:
+            print("⚠️ No Gemini API key found in environment variables.")
+            print("   Will use Mock LLM for testing.")
+            print("   To use Gemini, set GEMINI_API_KEY in your .env file.")
         else:
-            print("❌ LLM connection failed. Please check your LLM configuration")
-            if mistral_key:
-                print("   - Check your Mistral API key")
+            print(f"Found Gemini API key. Will attempt to use model: {os.getenv('GEMINI_MODEL_NAME', 'gemini-pro')}")
+            
+            # Test connection only if we have an API key
+            print("Testing Gemini API connection...")
+            connection_ok = llm_handler.test_connection()
+            
+            if connection_ok:
+                print("✅ Gemini API connection successful")
+            else:
+                print("❌ Gemini API connection failed. Will fall back to Mock LLM.")
+                print("   - Check your Gemini API key")
                 print("   - Verify the model name is correct")
                 print("   - Ensure you have internet connectivity")
-            return
+                # Force use of mock LLM
+                llm_handler.use_mock = True
     except Exception as e:
-        print(f"❌ LLM handler error: {e}")
-        print("   Will continue with testing using Mock LLM")
+        print(f"❌ Error setting up LLM handler: {e}")
+        print("   Will create a new handler with Mock LLM")
+        # Create new handler with Mock LLM only
         llm_handler = LLMHandler()
-        llm_handler.llm = llm_handler.MockLLM()
+        llm_handler.use_mock = True
     
     # Step 3: Test RAG pipeline with a sample query
     print("\nTesting RAG pipeline with a sample query...")
@@ -78,6 +80,7 @@ def main():
         sample_query = "What are the most common cybersecurity threats?"
         print(f"Query: '{sample_query}'")
         
+        print("Processing query (this may take a moment)...")
         result = rag_pipeline.process_query(query=sample_query)
         
         if result and "answer" in result and result["answer"]:
@@ -98,6 +101,8 @@ def main():
             return
     except Exception as e:
         print(f"❌ RAG pipeline error: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Final confirmation

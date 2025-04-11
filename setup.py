@@ -156,7 +156,7 @@ def verify_llm_connection():
         print("2. Network connectivity issues")
         print("3. Rate limiting or quota issues")
         print("\nTo fix:")
-        print("- Verify your OPENAI_API_KEY in the .env file")
+        print("- Verify your GEMINI_API_KEY in the .env file")
         print("- Check your network connection")
         print("- Check your API usage and limits")
         return False
@@ -201,7 +201,7 @@ def main():
     # Verify LLM connection
     if not verify_llm_connection():
         print("Failed to verify LLM connection.")
-        print("Please check your OpenAI API key and network connection.")
+        print("Please check your Gemini API key and network connection.")
         return
     
     print("\n=== Setup and Verification Complete ===")

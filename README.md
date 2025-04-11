@@ -9,7 +9,7 @@ A domain-specific chatbot for cybersecurity that combines Large Language Models 
 - Python 3.8+
 - Node.js 16+
 - Neo4j 4.4+ (local or cloud instance)
-- OpenAI API key (optional - a mock LLM is used if not provided)
+- Gemini API key (optional - a mock LLM is used if not provided)
 
 ### Installation
 
@@ -35,7 +35,7 @@ cp .env.template .env
 
 5. Edit the `.env` file with your credentials:
    - Set your Neo4j database settings
-   - Set your OpenAI API key (if you have one)
+   - Set your Gemini API key (if you have one)
    - Configure any other settings as needed
 
 ### Setting up the Knowledge Graph
@@ -83,7 +83,7 @@ npm start
 ## Architecture
 
 - Backend: FastAPI with Neo4j database integration
-- LLM: OpenAI's models (or built-in mock LLM for testing)
+- LLM: Gemini's models (or built-in mock LLM for testing)
 - Knowledge Graph: Neo4j populated with cybersecurity data
 - Frontend: React with Material UI components
 - RAG Pipeline: Retrieval Augmented Generation workflow

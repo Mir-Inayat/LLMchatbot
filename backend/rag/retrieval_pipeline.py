@@ -1,13 +1,19 @@
 import os
 from typing import List, Dict, Any, Optional
+import re
 from dotenv import load_dotenv
-import numpy as np
-from transformers import pipeline
 from sentence_transformers import SentenceTransformer
 
-# Import custom modules
+# Import the CybersecurityKGLoader that was missing
+from backend.knowledge_graph.cybersecurity_kg_loader import CybersecurityKGLoader
 from backend.knowledge_graph.neo4j_client import Neo4jClient
 from backend.models.llm_handler import LLMHandler
+
+# Try to import the NER pipeline if available
+try:
+    from transformers import pipeline
+except ImportError:
+    print("Warning: transformers package not available, entity extraction will be limited")
 
 class RAGPipeline:
     """
@@ -40,7 +46,6 @@ class RAGPipeline:
             try:
                 self.ner_model = pipeline(
                     "ner", 
-                    model=os.getenv("NER_MODEL", "medical-ner-model"),
                     aggregation_strategy="simple"
                 )
             except:
@@ -111,37 +116,30 @@ class RAGPipeline:
     
     def _is_cybersecurity_query(self, query: str) -> bool:
         """
-        Determine if a query is related to cybersecurity.
+        Determine if a query is cybersecurity-related.
+        
+        In this application, we treat all queries as cybersecurity-related
+        since that's our domain focus.
         
         Args:
             query: The user's query
             
         Returns:
-            Boolean indicating if the query is cybersecurity-related
+            True if the query appears to be cybersecurity-related (always true in this implementation)
         """
-        # Keywords for cybersecurity classification
-        cybersecurity_keywords = [
-            'attack', 'path', 'vulnerability', 'cyber', 'security', 'network', 
-            'rdp', 'access', 'admin', 'domain', 'BloodHound', 'kerberos', 
-            'user', 'computer', 'group', 'password', 'hack', 'breach', 'permission',
-            'exploit', 'active directory', 'ad', 'windows', 'session', 'threat',
-            'privilege', 'escalation', 'lateral movement'
-        ]
-        
-        # Lowercase the query for case-insensitive matching
-        query_lower = query.lower()
-        
-        # Check if any of the keywords are in the query
-        return any(keyword.lower() in query_lower for keyword in cybersecurity_keywords)
+        # For this application, we'll assume all queries are cybersecurity-related
+        # but we could implement more sophisticated detection if needed
+        return True
     
     def _process_cybersecurity_query(self, query: str, chat_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
-        """Process a cybersecurity-related query with specialized handling."""
-        
+        """
+        Process a cybersecurity-related query with specialized handling.
+        """
         # Step 1: Extract potential entities for improved context
         extracted_entities = self._extract_entities(query)
         potential_users = self._extract_potential_users(query)
         potential_computers = self._extract_potential_computers(query)
-        
+            
         # Step 2: Optimize query for the cybersecurity domain
         cybersecurity_terms = ["attack", "breach", "vulnerability", "threat", "malware", 
                                "phishing", "ransomware", "encryption", "firewall", "exploit"]
@@ -280,7 +278,7 @@ class RAGPipeline:
         # If no users were found with the simple heuristic, use a default demo user
         if not potential_users:
             potential_users.append("HilaryOlivia226@TestCompany.Local")
-            
+        
         return potential_users
     
     def _extract_potential_computers(self, text: str) -> List[str]:
@@ -304,7 +302,7 @@ class RAGPipeline:
             # Check if it looks like a computer name
             if clean_word.upper() == clean_word and len(clean_word) <= 4 and clean_word.isalnum():
                 potential_computers.append(clean_word)
-                
+            
             # Check for FQDN format
             if clean_word.count('.') >= 2 and any(domain in clean_word.lower() for domain in ['.local', '.com', '.net', '.org']):
                 potential_computers.append(clean_word)
@@ -312,7 +310,7 @@ class RAGPipeline:
         # If no computers were found, use a default demo computer
         if not potential_computers:
             potential_computers.append("DC01.TESTCOMPANY.LOCAL")
-            
+        
         return potential_computers
     
     def _generate_embedding(self, text: str) -> List[float]:
