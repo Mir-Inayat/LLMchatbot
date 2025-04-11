@@ -12,11 +12,13 @@ class Neo4jClient:
         
         # Get Neo4j connection details from environment
         neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+        neo4j_user = os.getenv("NEO4J_USERNAME", os.getenv("NEO4J_USER", "neo4j"))
         neo4j_password = os.getenv("NEO4J_PASSWORD", "password")
         neo4j_database = os.getenv("NEO4J_DATABASE", "neo4j")
         
-        # Initialize the driver
+        print(f"Initializing Neo4j client with URI: {neo4j_uri}")
+        
+        # Initialize the driver (encryption is handled automatically by URI scheme)
         self.driver = GraphDatabase.driver(
             neo4j_uri, 
             auth=(neo4j_user, neo4j_password)
@@ -36,7 +38,8 @@ class Neo4jClient:
             with self.driver.session(database=self.database) as session:
                 result = session.run("RETURN 1 AS test")
                 return result.single()["test"] == 1
-        except Exception:
+        except Exception as e:
+            print(f"Neo4j connection test failed: {e}")
             return False
     
     def execute_query(self, query: str, params: Dict = None) -> List[Dict]:
