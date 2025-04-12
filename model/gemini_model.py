@@ -75,13 +75,27 @@ class GeminiChain:
             'security_monitoring_tools': self.metta_kb.getsecuritymonitoringtools(),
             'all_mitigations': self.metta_kb.getallmitigations(),
             'threat_detection_tools': self.metta_kb.getthreatdetectiontools(),
-            'attack_vector_defenses': self.metta_kb.getdefensesforattackvector()
+            'attack_vector_defenses': self.metta_kb.getdefensesforattackvector(),
+            'network_security_domain_tools': self.metta_kb.gettoolsbysecuritydomain('NetworkSecurity'),
+            'endpoint_security_domain_tools': self.metta_kb.gettoolsbysecuritydomain('EndpointSecurity'),
+            'security_monitoring_domain_tools': self.metta_kb.gettoolsbysecuritydomain('SecurityMonitoring')
         }
+        
+        # Add mitigations by defense tools for important defense technologies
+        defense_tools = ['Firewall', 'Antivirus', 'EDR', 'WAF', 'SIEM', 'DLP', 'MFA']
+        defense_mitigations = {}
+        for tool in defense_tools:
+            mitigated_threats = self.metta_kb.findmitigationsbydefensetool(tool)
+            if mitigated_threats:
+                defense_mitigations[tool] = mitigated_threats
+        
+        context['defense_mitigations'] = defense_mitigations
+        
         return self._build_prompt(context)
 
     def _build_prompt(self, context):
         """Format the context into the structured prompt"""
-        return f"""
+        prompt = f"""
         CYBERSECURITY KNOWLEDGE BASE CONTEXT:
         - Threat Entities: {', '.join(context['threat_entities'])}
         - Defense Technologies: {', '.join(context['defense_technologies'])}
@@ -95,6 +109,20 @@ class GeminiChain:
         - Threat Mitigations: {', '.join(context['all_mitigations'])}
         - Threat Detection: {', '.join(context['threat_detection_tools'])}
         - Attack Vector Defenses: {', '.join(context['attack_vector_defenses'])}
+        
+        SECURITY DOMAINS:
+        - Network Security Domain Tools: {', '.join(context['network_security_domain_tools'])}
+        - Endpoint Security Domain Tools: {', '.join(context['endpoint_security_domain_tools'])}
+        - Security Monitoring Domain Tools: {', '.join(context['security_monitoring_domain_tools'])}
+        
+        DEFENSE TOOL CAPABILITIES:"""
+        
+        # Add defense tool capabilities section
+        if 'defense_mitigations' in context and context['defense_mitigations']:
+            for tool, mitigated_threats in context['defense_mitigations'].items():
+                prompt += f"\n- {tool} mitigates: {', '.join(mitigated_threats)}"
+        
+        prompt += """
 
         INSTRUCTIONS:
         1. Be factual and use the cybersecurity context above
@@ -111,6 +139,8 @@ class GeminiChain:
            - Use collapsible sections for detailed explanations with [ACCORDION:title:content]
            - Add interactive buttons with [BUTTON:text:action]
         """
+        
+        return prompt
 
     def _format_response(self, text):
         """Post-process the response to ensure proper formatting and extract multi-format elements"""

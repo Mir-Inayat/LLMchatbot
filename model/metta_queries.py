@@ -1,115 +1,118 @@
 import os
-import re
+from hyperon import MeTTa
 
 class MettaKnowledgeBase:
     def __init__(self):
-        self.kb_data = {}
+        self.metta = None
         self._load_knowledge()
 
     def _load_knowledge(self):
-        """Load knowledge base entries from cybersec_knowledge.metta without using hyperon"""
+        """Load knowledge base entries from cybersec_knowledge.metta using Hyperon"""
         try:
-            # Create a simplified knowledge structure for demo purposes
-            self.kb_data = {
-                "ThreatEntity": ["Malware", "Ransomware", "Phishing", "DDoS", "SQL Injection", "XSS"],
-                "DefenseTechnology": ["Firewall", "Antivirus", "IDS/IPS", "Encryption", "WAF", "MFA"],
-                "AttackVector": ["Email", "Web", "Network", "Physical", "Social Engineering"],
-                "DataTheft": ["PII Theft", "Credential Theft", "IP Theft"],
-                "NetworkSecurity": ["Firewall", "VPN", "NGFW", "NAC"],
-                "EndpointSecurity": ["Antivirus", "EDR", "Host Firewall", "DLP"],
-                "SecurityMonitoring": ["SIEM", "IDS", "NDR", "UBA"],
-                "MitigatedBy": {
-                    "Malware": ["Antivirus", "EDR", "Patching"],
-                    "Ransomware": ["Backup Solutions", "EDR", "User Training"],
-                    "Phishing": ["Email Security", "User Training", "MFA"],
-                    "SQL Injection": ["WAF", "Secure Coding", "Database Firewalls"],
-                    "DDoS": ["Anti-DDoS Services", "Network Filtering", "CDN"]
-                },
-                "DetectedBy": {
-                    "Malware": ["Antivirus", "EDR", "SIEM"],
-                    "Phishing": ["Email Security", "User Reports", "UEBA"],
-                    "DDoS": ["NDR", "NetFlow Analysis", "Traffic Monitoring"],
-                    "AnomalousActivity": ["SIEM"],
-                    "EndpointThreat": ["EDR"],
-                    "DataLeakage": ["DLP"],
-                    "NetworkAttack": ["IDS"]
-                }
-            }
-            print("Loaded mock knowledge base successfully")
+            # Initialize the MeTTa runtime
+            self.metta = MeTTa()
+            
+            # Load the knowledge base files
+            kb_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "metta")
+            
+            # Load the main knowledge base file
+            kb_path = os.path.join(kb_dir, "cybersec_knowledge.metta")
+            if os.path.exists(kb_path):
+                self.metta.run(f'!(load-file "{kb_path}")')
+                print(f"Loaded knowledge base from {kb_path}")
+            else:
+                print(f"Knowledge base file not found: {kb_path}")
+            
+            # Load the queries file
+            queries_path = os.path.join(kb_dir, "cybersec_queries.metta")
+            if os.path.exists(queries_path):
+                self.metta.run(f'!(load-file "{queries_path}")')
+                print(f"Loaded queries from {queries_path}")
+            else:
+                print(f"Queries file not found: {queries_path}")
+                
         except Exception as e:
-            print(f"Error loading mock knowledge base: {str(e)}")
+            print(f"Error loading knowledge base: {str(e)}")
+            # Initialize empty MeTTa runtime as fallback
+            self.metta = MeTTa()
 
-    def execute_query(self, query_template, *args):
-        """Mock query execution that returns data from our simplified structure"""
-        # We'll just parse the query name from the template
-        query_match = re.search(r"!\((get[A-Za-z]+|find[A-Za-z]+)", query_template)
-        if not query_match:
-            return ["Query not recognized"]
-        
-        query_name = query_match.group(1)
+    def execute_query(self, query_string, *args):
+        """Execute a query using the Hyperon MeTTa runtime"""
         try:
-            # Map query functions to data retrieval
-            return getattr(self, query_name.lower())(*args)
-        except AttributeError:
-            return [f"Function {query_name} not implemented in mock"]
+            # Format the query string with arguments
+            formatted_query = query_string
+            for arg in args:
+                formatted_query = formatted_query.replace('?', f'"{arg}"', 1)
+            
+            # Execute the query
+            result = self.metta.run(formatted_query)
+            
+            # Convert result to a list of strings
+            string_results = []
+            for item in result:
+                string_results.append(str(item).replace('(', '').replace(')', '').strip())
+            
+            return string_results
         except Exception as e:
-            return [f"Query execution failed: {str(e)}"]
+            print(f"Query execution failed: {str(e)}")
+            return []
 
     def getthreatentities(self):
-        return self.kb_data.get("ThreatEntity", [])
+        return self.execute_query("!(getThreatEntities)")
     
     def getdefensetechnologies(self):
-        return self.kb_data.get("DefenseTechnology", [])
+        return self.execute_query("!(getDefenseTechnologies)")
     
     def getattackvectors(self):
-        return self.kb_data.get("AttackVector", [])
+        return self.execute_query("!(getAttackVectors)")
     
     def getdatatheftthreats(self):
-        return self.kb_data.get("DataTheft", [])
+        return self.execute_query("!(getDataTheftThreats)")
     
     def getnetworksecuritytools(self):
-        return self.kb_data.get("NetworkSecurity", [])
+        return self.execute_query("!(getNetworkSecurityTools)")
     
     def getendpointsecuritytools(self):
-        return self.kb_data.get("EndpointSecurity", [])
+        return self.execute_query("!(getEndpointSecurityTools)")
     
     def getsecuritymonitoringtools(self):
-        return self.kb_data.get("SecurityMonitoring", [])
+        return self.execute_query("!(getSecurityMonitoringTools)")
     
     def getthreatmitigations(self, threat):
-        return self.kb_data.get("MitigatedBy", {}).get(threat, [])
+        return self.execute_query(f'!(getThreatMitigations "{threat}")')
     
     def getallmitigations(self):
-        result = []
-        for threat, mitigations in self.kb_data.get("MitigatedBy", {}).items():
-            for mitigation in mitigations:
-                result.append(f"{threat}, {mitigation}")
-        return result
+        results = self.execute_query("!(getAllMitigations)")
+        formatted_results = []
+        for result in results:
+            parts = result.split()
+            if len(parts) >= 2:
+                formatted_results.append(f"{parts[0]}, {parts[1]}")
+        return formatted_results
     
     def getdefensesforattackvector(self):
-        result = []
-        for attack in self.kb_data.get("AttackVector", []):
-            mitigations = self.kb_data.get("MitigatedBy", {}).get(attack, [])
-            for mitigation in mitigations:
-                result.append(f"{attack}, {mitigation}")
-        return result
+        results = self.execute_query("!(getDefensesForAttackVector)")
+        formatted_results = []
+        for result in results:
+            parts = result.split()
+            if len(parts) >= 2:
+                formatted_results.append(f"{parts[0]}, {parts[1]}")
+        return formatted_results
     
     def getthreatdetectiontools(self):
-        result = []
-        for threat, tools in self.kb_data.get("DetectedBy", {}).items():
-            for tool in tools:
-                result.append(f"{threat}, {tool}")
-        return result
+        results = self.execute_query("!(getThreatDetectionTools)")
+        formatted_results = []
+        for result in results:
+            parts = result.split()
+            if len(parts) >= 2:
+                formatted_results.append(f"{parts[0]}, {parts[1]}")
+        return formatted_results
     
     def gettoolsbysecuritydomain(self, domain):
-        return self.kb_data.get(domain, [])
+        return self.execute_query(f'!(getToolsBySecurityDomain "{domain}")')
     
     def findmitigationsbydefensetool(self, tool):
-        result = []
-        for threat, mitigations in self.kb_data.get("MitigatedBy", {}).items():
-            if tool in mitigations:
-                result.append(threat)
-        return result
+        return self.execute_query(f'!(findMitigationsByDefenseTool "{tool}")')
     
     def get_total_threats(self):
         return len(self.getthreatentities())

@@ -29,3 +29,5 @@
 
 (= (findMitigationsByDefenseTool $tool)
    (match &self (MitigatedBy $threat $tool) $threat))
+
+   
